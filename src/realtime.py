@@ -93,9 +93,11 @@ class RealtimeASLRecognizer:
         )
         self.detector = vision.HandLandmarker.create_from_options(options)
 
-        # Smoothing for predictions
+        # Prediction state
         self.prediction_history = []
         self.history_size = 5
+        self.current_prediction = (None, 0.0)
+        self.last_processed_timestamp = -1
 
     def _result_callback(self, result, output_image, timestamp_ms):
         """Callback for async hand detection results."""
@@ -204,22 +206,26 @@ class RealtimeASLRecognizer:
             # Flip horizontally for mirror effect
             frame = cv2.flip(frame, 1)
 
-            # Convert to RGB and create MediaPipe Image
-            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            # Resize for MediaPipe processing (optimization)
+            # MediaPipe doesn't need high res; 320x240 is usually plenty for landmarks
+            process_w, process_h = 320, 240
+            frame_small = cv2.resize(frame, (process_w, process_h))
+            frame_rgb = cv2.cvtColor(frame_small, cv2.COLOR_BGR2RGB)
             mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame_rgb)
 
             # Process frame asynchronously
             frame_timestamp += 33  # ~30fps
             self.detector.detect_async(mp_image, frame_timestamp)
 
-            prediction = None
-            confidence = 0.0
+            # Get current prediction from state
+            prediction, confidence = self.current_prediction
 
             # Use latest available result
             if self.latest_result and self.latest_result.hand_landmarks:
-                for hand_landmarks in self.latest_result.hand_landmarks:
-                    # Draw landmarks
-                    self.draw_landmarks_on_image(frame, hand_landmarks)
+                # Only run classifier if we have a new result
+                if self.result_timestamp > self.last_processed_timestamp:
+                    # For ASL we only care about the first detected hand
+                    hand_landmarks = self.latest_result.hand_landmarks[0]
 
                     # Get prediction
                     landmarks = self.normalize_landmarks(hand_landmarks)
@@ -229,10 +235,19 @@ class RealtimeASLRecognizer:
                     probs = self.clf.predict_proba(landmarks)[0]
                     conf = np.max(probs)
 
-                    prediction, confidence = self.get_smoothed_prediction(pred, conf)
+                    self.current_prediction = self.get_smoothed_prediction(pred, conf)
+                    self.last_processed_timestamp = self.result_timestamp
+
+                # Draw landmarks (every frame for smooth visual)
+                for hand_landmarks in self.latest_result.hand_landmarks:
+                    self.draw_landmarks_on_image(frame, hand_landmarks)
+
+                prediction, confidence = self.current_prediction
             else:
                 # Clear history when no hand detected
                 self.prediction_history = []
+                self.current_prediction = (None, 0.0)
+                prediction, confidence = None, 0.0
 
             # Calculate FPS
             current_time = time.time()
@@ -257,10 +272,10 @@ class RealtimeASLRecognizer:
         """Draw the UI overlay on the frame."""
         h, w = frame.shape[:2]
 
-        # Semi-transparent background for text
-        overlay = frame.copy()
-        cv2.rectangle(overlay, (0, h - 100), (w, h), (0, 0, 0), -1)
-        cv2.addWeighted(overlay, 0.6, frame, 0.4, 0, frame)
+        # Optimized semi-transparent background (ROI only)
+        roi = frame[h - 100 : h, 0:w]
+        overlay = np.zeros_like(roi)
+        cv2.addWeighted(overlay, 0.6, roi, 0.4, 0, roi)
 
         # Prediction text
         if prediction:
