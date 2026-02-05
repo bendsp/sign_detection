@@ -1,0 +1,37 @@
+# Virtual environment
+venv/
+.venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# Data files (large datasets - download separately)
+data/asl_alphabet_train/
+data/asl_alphabet_test/
+data/asl-alphabet.zip
+data/*.pkl
+
+# Model files (can be regenerated)
+models/*.pkl
+models/*.task
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Jupyter
+.ipynb_checkpoints/
