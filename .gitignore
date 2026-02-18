@@ -19,8 +19,8 @@ data/asl_alphabet_test/
 data/asl-alphabet.zip
 data/*.pkl
 
-# Model files (can be regenerated)
-models/*.pkl
+# Model files
+# models/asl_classifier.pkl is tracked via Git LFS (see .gitattributes)
 models/*.task
 
 # IDE
