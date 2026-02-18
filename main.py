@@ -4,6 +4,7 @@ ASL Sign Language Recognition - Main CLI Entry Point
 
 Usage:
     python main.py download          - Download the ASL Alphabet dataset from Kaggle
+    python main.py download --force   - Re-download even if data already exists
     python main.py extract            - Extract hand landmarks from dataset images
     python main.py train              - Train the classifier on extracted features
     python main.py predict <img>      - Predict the ASL letter in an image
@@ -25,37 +26,58 @@ def print_usage():
     print(__doc__)
 
 
-def cmd_download():
+def cmd_download(force=False):
     """Download the ASL Alphabet dataset from Kaggle."""
     import subprocess
+    import shutil
+    import zipfile
+
+    dataset_dir = "data/asl_alphabet_train/asl_alphabet_train"
+    zip_path = "data/asl-alphabet.zip"
+
+    if os.path.exists(dataset_dir) and not force:
+        print(f"Dataset already exists at {dataset_dir}, skipping download.")
+        print("Use --force to re-download.")
+        return
+
+    if force and os.path.exists(dataset_dir):
+        print(f"Removing existing dataset at {dataset_dir}...")
+        shutil.rmtree(dataset_dir)
+    if force and os.path.exists(zip_path):
+        os.remove(zip_path)
 
     print("Downloading ASL Alphabet dataset from Kaggle...")
     os.makedirs("data", exist_ok=True)
 
-    result = subprocess.run(
-        [
-            "kaggle",
-            "datasets",
-            "download",
-            "-d",
-            "grassknoted/asl-alphabet",
-            "-p",
-            "data",
-        ],
-        capture_output=True,
-        text=True,
-    )
+    # Support KAGGLE_API_TOKEN env var (new token format)
+    api_token = os.environ.get("KAGGLE_API_TOKEN")
+    if api_token:
+        os.environ["KAGGLE_USERNAME"] = os.environ.get("KAGGLE_USERNAME", "_")
+        os.environ["KAGGLE_KEY"] = api_token
 
-    if result.returncode != 0:
-        print(f"Error: {result.stderr}")
+    try:
+        from kaggle.api.kaggle_api_extended import KaggleApi
+        api = KaggleApi()
+        api.authenticate()
+        print("Authenticated with Kaggle API.")
+        api.dataset_download_files("grassknoted/asl-alphabet", path="data", quiet=False)
+    except Exception as e:
+        print(f"Kaggle API error: {e}")
+        print("\nTo fix this, do ONE of the following:")
+        print("  1. Place your kaggle.json in ~/.kaggle/kaggle.json")
+        print("     (Download from https://www.kaggle.com/settings → Create New Token)")
+        print("  2. Set the KAGGLE_API_TOKEN environment variable:")
+        print("     export KAGGLE_API_TOKEN=your_token_here")
         return
 
-    print(result.stdout)
-
     # Unzip
-    print("Extracting dataset...")
-    subprocess.run(["unzip", "-q", "-o", "data/asl-alphabet.zip", "-d", "data"])
-    print("Done! Dataset extracted to data/asl_alphabet_train/")
+    if os.path.exists(zip_path):
+        print("Extracting dataset...")
+        with zipfile.ZipFile(zip_path, 'r') as z:
+            z.extractall("data")
+        print("Done! Dataset extracted to data/asl_alphabet_train/")
+    else:
+        print("Error: Download completed but zip file not found.")
 
 
 def cmd_extract(sample_per_class=None):
@@ -129,7 +151,8 @@ def main():
     command = sys.argv[1].lower()
 
     if command == "download":
-        cmd_download()
+        force = "--force" in sys.argv
+        cmd_download(force=force)
 
     elif command == "extract":
         sample_per_class = None

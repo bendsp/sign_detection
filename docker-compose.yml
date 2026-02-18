@@ -1,0 +1,46 @@
+services:
+  # Download the ASL Alphabet dataset from Kaggle
+  download:
+    build: .
+    command: download
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models
+      - ~/.kaggle:/root/.kaggle:ro
+    environment:
+      - KAGGLE_API_TOKEN=${KAGGLE_API_TOKEN:-}
+
+  # Force re-download (ignores existing data)
+  download-force:
+    build: .
+    command: [ "download", "--force" ]
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models
+      - ~/.kaggle:/root/.kaggle:ro
+    environment:
+      - KAGGLE_API_TOKEN=${KAGGLE_API_TOKEN:-}
+
+  # Extract hand landmarks from dataset images
+  extract:
+    build: .
+    command: extract
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models
+
+  # Extract with limited samples (quick test)
+  extract-quick:
+    build: .
+    command: [ "extract", "200" ]
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models
+
+  # Train the Random Forest classifier
+  train:
+    build: .
+    command: train
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models
