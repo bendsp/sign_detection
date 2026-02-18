@@ -3,11 +3,12 @@
 ASL Sign Language Recognition - Main CLI Entry Point
 
 Usage:
-    python main.py download     - Download the ASL Alphabet dataset from Kaggle
-    python main.py extract      - Extract hand landmarks from dataset images
-    python main.py train        - Train the classifier on extracted features
-    python main.py predict <img> - Predict the ASL letter in an image
-    python main.py realtime     - Launch real-time webcam recognition
+    python main.py download          - Download the ASL Alphabet dataset from Kaggle
+    python main.py extract            - Extract hand landmarks from dataset images
+    python main.py train              - Train the classifier on extracted features
+    python main.py predict <img>      - Predict the ASL letter in an image
+    python main.py realtime           - Launch real-time webcam recognition
+    python main.py realtime --spell   - Launch real-time with spell/word mode
 """
 
 import sys
@@ -105,7 +106,7 @@ def cmd_predict(image_path):
     display_prediction(image_path, model_path)
 
 
-def cmd_realtime(camera_index=0):
+def cmd_realtime(camera_index=0, spell_mode=False):
     """Launch real-time webcam recognition."""
     from src.realtime import main as realtime_main
 
@@ -116,7 +117,7 @@ def cmd_realtime(camera_index=0):
         print("Run 'python main.py train' first.")
         return
 
-    realtime_main(model_path, camera_index)
+    realtime_main(model_path, camera_index, spell_mode=spell_mode)
 
 
 def main():
@@ -148,9 +149,13 @@ def main():
 
     elif command == "realtime":
         camera_index = 0
-        if len(sys.argv) > 2:
-            camera_index = int(sys.argv[2])
-        cmd_realtime(camera_index)
+        spell_mode = "--spell" in sys.argv
+        # Parse camera index from non-flag args
+        for arg in sys.argv[2:]:
+            if arg != "--spell":
+                camera_index = int(arg)
+                break
+        cmd_realtime(camera_index, spell_mode=spell_mode)
 
     elif command in ["help", "-h", "--help"]:
         print_usage()

@@ -35,6 +35,20 @@ def train_classifier(features_path, model_path, test_size=0.2, random_state=42):
     print(f"Number of classes: {len(classes)}")
     print(f"Feature dimension: {features.shape[1]}")
 
+    # Filter out classes with too few samples for stratified split
+    from collections import Counter
+
+    label_counts = Counter(labels)
+    min_samples = max(2, int(1 / test_size) + 1)  # Need at least 1 per split
+    rare_classes = [c for c, n in label_counts.items() if n < min_samples]
+    if rare_classes:
+        print(f"\nRemoving {len(rare_classes)} class(es) with < {min_samples} samples: {rare_classes}")
+        mask = np.array([l not in rare_classes for l in labels])
+        features = features[mask]
+        labels = [l for l in labels if l not in rare_classes]
+        classes = [c for c in classes if c not in rare_classes]
+        print(f"Filtered dataset: {len(features)} samples, {len(classes)} classes")
+
     # Split data
     X_train, X_test, y_train, y_test = train_test_split(
         features,

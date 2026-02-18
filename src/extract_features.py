@@ -8,6 +8,10 @@ Enhanced features include:
 - Pairwise distances between key landmarks (thumb tip to each fingertip, etc.)
 - Angles between finger joints
 - Relative z-depth comparisons (thumb vs fingers)
+- Thumb-to-PIP/DIP distances for M/N/E/S/T disambiguation
+- Finger drape detection, palm-plane distance, DIP curl angles
+
+Total: 63 base + 54 engineered = 117 features
 """
 
 import os
@@ -131,6 +135,69 @@ def compute_engineered_features(landmarks):
     cross_z = thumb_vec[0] * index_vec[1] - thumb_vec[1] * index_vec[0]
     features.append(cross_z)
 
+    # --- New features for M/N/E/S/T disambiguation (24 features) ---
+
+    # 10. Thumb tip to each finger's PIP joint (4 features)
+    # M/N: thumb sits at PIP level under the fingers; S/E: it doesn't
+    for pip_idx in [INDEX_PIP, MIDDLE_PIP, RING_PIP, PINKY_PIP]:
+        dist = np.linalg.norm(thumb_tip - landmarks[pip_idx])
+        features.append(dist)
+
+    # 11. Thumb tip to each finger's DIP joint (4 features)
+    # How deeply the thumb is tucked under the fingers
+    for dip_idx in [INDEX_DIP, MIDDLE_DIP, RING_DIP, PINKY_DIP]:
+        dist = np.linalg.norm(thumb_tip - landmarks[dip_idx])
+        features.append(dist)
+
+    # 12. Thumb vs fingertip y-position (4 features)
+    # Positive = fingertip is below thumb (fingers drape over thumb in M/N)
+    # Negative = thumb is below fingertip (thumb in front like S)
+    for tip_idx in [INDEX_TIP, MIDDLE_TIP, RING_TIP, PINKY_TIP]:
+        y_diff = landmarks[tip_idx, 1] - thumb_tip[1]
+        features.append(y_diff)
+
+    # 13. Thumb position relative to middle finger MCP (3 features: x, y, z)
+    # Which finger valley the thumb sits in for M/N/T
+    thumb_middle_diff = landmarks[THUMB_TIP] - landmarks[MIDDLE_MCP]
+    features.extend(thumb_middle_diff.tolist())
+
+    # 14. Thumb position relative to ring finger MCP (3 features: x, y, z)
+    # M uses ring finger (3 fingers over thumb), N doesn't (only 2)
+    thumb_ring_diff = landmarks[THUMB_TIP] - landmarks[RING_MCP]
+    features.extend(thumb_ring_diff.tolist())
+
+    # 15. Finger drape count proxy (1 feature)
+    # Approximates how many fingers are draped over the thumb: M=3, N=2, others=0
+    drape_score = 0.0
+    for tip_idx in [INDEX_TIP, MIDDLE_TIP, RING_TIP, PINKY_TIP]:
+        y_below = landmarks[tip_idx, 1] - thumb_tip[1]  # positive = below thumb
+        dist = np.linalg.norm(thumb_tip[:2] - landmarks[tip_idx, :2])
+        if y_below > 0 and dist < 0.5:
+            drape_score += 1.0 - dist
+    features.append(drape_score)
+
+    # 16. Thumb-to-palm-plane signed distance (1 feature)
+    # Palm plane from MCP joints; S: thumb in front, M/N: thumb behind, A: edge
+    v1 = landmarks[INDEX_MCP] - landmarks[WRIST]
+    v2 = landmarks[PINKY_MCP] - landmarks[WRIST]
+    palm_normal = np.cross(v1, v2)
+    palm_normal = palm_normal / (np.linalg.norm(palm_normal) + 1e-8)
+    thumb_to_wrist = landmarks[THUMB_TIP] - landmarks[WRIST]
+    signed_dist = np.dot(thumb_to_wrist, palm_normal)
+    features.append(signed_dist)
+
+    # 17. DIP-level curl angles for each finger (4 features)
+    # E vs S: different tightness of fingertip curl at the last knuckle
+    dip_joints = [
+        (INDEX_PIP, INDEX_DIP, INDEX_TIP),
+        (MIDDLE_PIP, MIDDLE_DIP, MIDDLE_TIP),
+        (RING_PIP, RING_DIP, RING_TIP),
+        (PINKY_PIP, PINKY_DIP, PINKY_TIP),
+    ]
+    for pip_idx, dip_idx, tip_idx in dip_joints:
+        angle = compute_angle(landmarks[pip_idx], landmarks[dip_idx], landmarks[tip_idx])
+        features.append(angle)
+
     return np.array(features)
 
 
@@ -162,7 +229,7 @@ class HandLandmarkExtractor:
 
         Returns:
             Feature array or None if no hand detected.
-            If use_engineered_features=True: 63 base + 35 engineered = 98 features
+            If use_engineered_features=True: 63 base + 54 engineered = 117 features
             If use_engineered_features=False: 63 features
         """
         # Convert BGR to RGB
