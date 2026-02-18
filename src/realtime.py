@@ -16,6 +16,7 @@ from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 
 from src.extract_features import compute_engineered_features
+from src.motion import MotionDetector
 
 
 # Model URL for hand landmarker
@@ -98,6 +99,9 @@ class RealtimeASLRecognizer:
         self.history_size = 5
         self.current_prediction = (None, 0.0)
         self.last_processed_timestamp = -1
+
+        # Motion detection for J and Z
+        self.motion_detector = MotionDetector(buffer_size=30)
 
     def _result_callback(self, result, output_image, timestamp_ms):
         """Callback for async hand detection results."""
@@ -227,6 +231,9 @@ class RealtimeASLRecognizer:
                     # For ASL we only care about the first detected hand
                     hand_landmarks = self.latest_result.hand_landmarks[0]
 
+                    # Feed landmarks to motion detector
+                    self.motion_detector.add_frame(hand_landmarks)
+
                     # Get prediction
                     landmarks = self.normalize_landmarks(hand_landmarks)
                     landmarks = landmarks.reshape(1, -1)
@@ -238,15 +245,28 @@ class RealtimeASLRecognizer:
                     self.current_prediction = self.get_smoothed_prediction(pred, conf)
                     self.last_processed_timestamp = self.result_timestamp
 
+                    # Check for motion-based letters (J, Z)
+                    motion_letter, motion_conf = self.motion_detector.classify_motion()
+                    if motion_letter:
+                        self.current_prediction = (motion_letter, motion_conf)
+                        # Clear static prediction history to avoid interference
+                        self.prediction_history = []
+
                 # Draw landmarks (every frame for smooth visual)
                 for hand_landmarks in self.latest_result.hand_landmarks:
                     self.draw_landmarks_on_image(frame, hand_landmarks)
 
-                prediction, confidence = self.current_prediction
+                # Check if motion detection has a recent result to display
+                motion_display, motion_disp_conf = self.motion_detector.get_display_detection()
+                if motion_display:
+                    prediction, confidence = motion_display, motion_disp_conf
+                else:
+                    prediction, confidence = self.current_prediction
             else:
                 # Clear history when no hand detected
                 self.prediction_history = []
                 self.current_prediction = (None, 0.0)
+                self.motion_detector.clear()
                 prediction, confidence = None, 0.0
 
             # Calculate FPS
@@ -271,6 +291,10 @@ class RealtimeASLRecognizer:
     def _draw_ui(self, frame, prediction, confidence, fps):
         """Draw the UI overlay on the frame."""
         h, w = frame.shape[:2]
+
+        # Draw motion trajectory trails
+        self._draw_trajectory(frame, "index", (255, 200, 0))   # Light blue for index (BGR)
+        self._draw_trajectory(frame, "pinky", (255, 0, 200))   # Magenta for pinky (BGR)
 
         # Optimized semi-transparent background (ROI only)
         roi = frame[h - 100 : h, 0:w]
@@ -375,6 +399,37 @@ class RealtimeASLRecognizer:
             1,
             cv2.LINE_AA,
         )
+
+        # Motion detection indicator
+        motion_disp, _ = self.motion_detector.get_display_detection()
+        if motion_disp:
+            cv2.putText(
+                frame,
+                f"MOTION: {motion_disp}",
+                (10, 60),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                (0, 255, 255),
+                2,
+                cv2.LINE_AA,
+            )
+
+    def _draw_trajectory(self, frame, which, color):
+        """Draw the fingertip trajectory trail on the frame."""
+        h, w = frame.shape[:2]
+        points = self.motion_detector.get_trajectory_points(w, h, which=which)
+
+        if len(points) < 3:
+            return
+
+        # Draw trail with fading opacity (older = thinner/dimmer)
+        for i in range(1, len(points)):
+            # Thickness increases towards the tip
+            thickness = max(1, int(i / len(points) * 4))
+            # Fade alpha via color intensity
+            alpha = i / len(points)
+            faded_color = tuple(int(c * alpha) for c in color)
+            cv2.line(frame, points[i - 1], points[i], faded_color, thickness)
 
 
 def main(model_path="models/asl_classifier.pkl", camera_index=0):
